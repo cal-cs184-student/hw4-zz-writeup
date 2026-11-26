@@ -28,27 +28,51 @@
 	<body>
 		<div class="container">
 		<h1>CS184/284A Fall 2026 Homework 4 Write-Up</h1>
-		<div style="text-align: center;">Names: </div>
+		<div style="text-align: center;">Names: Ziniu Zheng</div>
 
 		<br>
 
-		Link to webpage: (TODO) <a href="https://cs184.eecs.berkeley.edu/fa26">cs184.eecs.berkeley.edu/fa26</a>
+		Link to webpage: <a href="https://cal-cs184-student.github.io/hw4-zz-writeup/">https://cal-cs184-student.github.io/hw4-zz-writeup/</a>
 
 		<br>
 
-		Link to GitHub repository: (TODO) <a href="https://cs184.eecs.berkeley.edu/fa26">cs184.eecs.berkeley.edu/fa26</a>
+		Link to GitHub repository: <a href="https://github.com/cal-cs184-student/hw4-zz">https://github.com/cal-cs184-student/hw4-zz</a>
 
-		<figure>
-			<img src="assets/clothsim.png" alt="Cloth draped over sphere" style="width:70%"/>
-			<figcaption>You can add images with captions!</figcaption>
-		</figure>
-
-		<!--
-		We've already added one heading per part, to make your write-up as navigable when grading. Please fit your write-up within these sections!
-		-->
 
 		<h2>Overview</h2>
-		Give a high-level overview of what you implemented in this homework. Think about what you've built as a whole. Share your thoughts on what interesting things you've learned from completing the homework.
+		<p>
+			In this homework I built a real-time cloth simulator and a set of GLSL shaders to render it. The cloth is a
+			<b>mass-spring system</b>: a grid of point masses connected by structural, shearing, and bending springs, each
+			resisting a different kind of deformation (Part 1). Every time step, the simulator adds up gravity and Hooke's-law
+			spring forces, advances each mass with damped <b>Verlet integration</b>, and then applies Provot's constraint so
+			that no spring stretches more than 10% (Part 2). On top of that, the cloth reacts to its surroundings. It
+			collides with spheres and planes by correcting positions, with friction (Part 3). It also avoids passing through
+			itself, using a <b>spatial hash</b> so that each mass only checks nearby masses instead of all of them (Part 4).
+			Finally, I wrote vertex and fragment shaders for diffuse and Blinn-Phong lighting, texture mapping, bump and
+			displacement mapping, and an environment-mapped mirror (Part 5).
+		</p>
+		<p>
+			A few things I found especially interesting:
+		</p>
+		<ul>
+			<li><b>Simple local rules give realistic global behavior.</b> No part of the code knows what a fold or a drape
+				is. Folds, wrinkles, and the cloth wrapping around a sphere all come from springs between neighbors and a few
+				position corrections.</li>
+			<li><b>Parameters can be equivalent.</b> Gravity accelerates every mass equally, while spring forces are divided
+				by the mass, so the motion depends only on \(k_s / \text{density}\). Multiplying the density by 10 gave exactly
+				the same simulation as dividing \(k_s\) by 10. I first noticed this from similar-looking screenshots and then
+				confirmed it numerically.</li>
+			<li><b>Practical simulation is full of trade-offs between accuracy and speed.</b> The spring-length constraint is
+				applied in a single pass, so a few springs end slightly over the limit. Spatial hashing turns an \(O(n^2)\)
+				collision check into a near-linear one, but it misses pairs that sit on opposite sides of a box boundary.
+				These approximations are good enough to look right, and they let the simulation run in real time.</li>
+			<li><b>Small differences grow quickly in cloth that folds onto itself.</b> Runs that are mathematically equivalent
+				drift apart after thousands of steps because of floating-point rounding. They show the same overall behavior
+				but not the same exact folds.</li>
+			<li><b>Shading can fake geometry, but only up to a point.</b> Bump mapping makes bricks appear on even a 16
+				&times; 16 sphere, but the silhouette gives it away. Displacement mapping really changes the shape, but only
+				when the mesh has enough vertices to follow the texture.</li>
+		</ul>
 
 		<h2>Part 1: Masses and springs</h2>
 		<p>
@@ -223,12 +247,25 @@
 			</table>
 		</div>
 		<p>
-			With a <b>low</b> \(k_s\), the springs are soft, so gravity stretches them more. Compared with the default, the
-			top edge between the two pinned corners sags much deeper. The cloth also gets longer: its bottom edge bows
-			downward instead of staying straight, and its sides curve inward. The grid near the pinned corners is visibly
-			stretched and skewed. With a <b>high</b> \(k_s\), the cloth is stiff. The top edge is pulled almost straight,
-			the cloth stays close to its original square shape, and its bottom edge sits higher than in the default case.
-			Small wrinkles appear near the pinned corners, where the taut cloth is pulled in two directions at once.
+			<b>From start to rest.</b> In every case the cloth starts flat and horizontal, swings down around its two pinned
+			corners like a pendulum, and comes to rest hanging vertically. To compare the motion precisely, I also ran the
+			same scene without the GUI and tracked the middle of the cloth's free (bottom) edge (results in the table below).
+			With a <b>low</b> \(k_s\), the springs give way easily, so the cloth stretches like rubber as it swings down.
+			The bottom edge reaches its lowest point sooner (about 1.5 s, versus about 2.4 s at the default) and ends up
+			6 cm lower than with the default. With a <b>high</b> \(k_s\), the cloth swings down almost as a rigid sheet,
+			barely stretching, and creeps into its final position. With the default damping, none of the runs bounced
+			noticeably (no vertical rebound larger than 5 mm). All of them settled to within 1 cm of their final position
+			after about 2 seconds, so the spring constant mainly changes <i>how much</i> the cloth stretches, not how long
+			it moves.
+		</p>
+		<p>
+			<b>At rest.</b> With a <b>low</b> \(k_s\), the springs are soft, so gravity stretches them more. Compared with
+			the default, the top edge between the two pinned corners sags much deeper. The cloth also gets longer: its
+			bottom edge bows downward instead of staying straight, and its sides curve inward. The grid near the pinned
+			corners is visibly stretched and skewed. With a <b>high</b> \(k_s\), the cloth is stiff. The top edge is pulled
+			almost straight, the cloth stays close to its original square shape, and its bottom edge sits higher than in the
+			default case. Small wrinkles appear near the pinned corners, where the taut cloth is pulled in two directions
+			at once.
 		</p>
 
 		<h4>Density</h4>
@@ -254,6 +291,33 @@
 			\(m\) is proportional to density. Multiplying the density by 10 (15 &rarr; 150) therefore looks just like
 			dividing \(k_s\) by 10 (5000 &rarr; 500). Dividing the density by 15 (15 &rarr; 1) looks like multiplying
 			\(k_s\) by 10 (5000 &rarr; 50000), with the top edge even slightly flatter.
+		</p>
+		<p>
+			The same holds for the motion from start to rest. A heavy cloth (density 150) stretches as it swings down and
+			reaches its lowest point at about 1.5 s, exactly like the \(k_s\) = 500 run. A light cloth (density 1) swings
+			down almost without stretching, like the \(k_s\) = 50000 run. The reason is that in this simulation, gravity
+			gives every mass the same acceleration no matter its mass, while the spring forces are divided by the mass.
+			So the motion depends only on the ratio \(k_s / \text{density}\). Density 150 with \(k_s\) = 5000 is
+			mathematically the same simulation as density 15 with \(k_s\) = 500, and the measurements in the table below
+			agree to every digit shown.
+		</p>
+		<table style="margin: 0 auto; border-collapse: collapse; text-align: center;">
+			<tr>
+				<th style="padding: 4px 10px;">Run (<code>pinned2.json</code>)</th>
+				<th style="padding: 4px 10px;">Final height of bottom edge (m)</th>
+				<th style="padding: 4px 10px;">Time to lowest point</th>
+				<th style="padding: 4px 10px;">Settled within 1 cm after</th>
+			</tr>
+			<tr><td>default (\(k_s\) 5000, density 15)</td><td>&minus;0.083</td><td>2.38 s</td><td>2.1 s</td></tr>
+			<tr><td>\(k_s\) = 500</td><td>&minus;0.143</td><td>1.46 s</td><td>2.1 s</td></tr>
+			<tr><td>\(k_s\) = 50000</td><td>&minus;0.022</td><td>2.46 s</td><td>2.0 s</td></tr>
+			<tr><td>density = 150</td><td>&minus;0.143</td><td>1.46 s</td><td>2.1 s</td></tr>
+			<tr><td>density = 1</td><td>&minus;0.016</td><td>2.36 s</td><td>2.0 s</td></tr>
+		</table>
+		<p style="text-align: center; font-size: 0.9em;">
+			Measured in a headless run of the same simulation code: the cloth starts at height 1 m, and the table shows the
+			middle of its free edge. The "lowest point" is reached either while still sinking or at the end of the swing.
+			Time to lowest point is later than the settle time when the cloth creeps down its last millimeter.
 		</p>
 
 		<h4>Damping</h4>
@@ -543,21 +607,271 @@
 		</p>
 
 		<h2>Part 5: Shaders</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+
+		<h3>What a shader program is</h3>
+		<p>
+			A shader is a small program that runs on the GPU, in parallel, as part of the rendering pipeline. A
+			<b>shader program</b> pairs two of them. The <b>vertex shader</b> runs once per vertex. It transforms the
+			vertex's position into screen space (<code>gl_Position</code>), and it can pass per-vertex values such as the
+			world-space position, normal, tangent, and uv coordinates on to the next stage. The rasterizer then turns each
+			triangle into fragments (candidate pixels) and interpolates those values across the triangle. The
+			<b>fragment shader</b> runs once per fragment. It reads the interpolated values together with uniforms (values
+			that are the same for the whole draw call, such as the camera position, light position, and textures), and
+			computes that pixel's final color. Lighting and material effects therefore usually live in the fragment shader,
+			while anything that changes the geometry itself, like displacement, has to happen in the vertex shader.
+		</p>
+
+		<h3>Blinn-Phong shading</h3>
+		<p>
+			The Blinn-Phong model approximates how light reflects off a surface as the sum of three terms:
+			\[ L = k_a I_a \;+\; k_d \frac{I}{r^2} \max(0, \mathbf{n}\cdot\mathbf{l}) \;+\; k_s \frac{I}{r^2} \max(0, \mathbf{n}\cdot\mathbf{h})^p . \]
+		</p>
+		<ul>
+			<li><b>Ambient</b> (\(k_a I_a\)) is a constant that stands in for all the indirect light bouncing around the scene.
+				It does not depend on the light, the normal, or the viewer, so it just keeps surfaces facing away from the light
+				from turning completely black.</li>
+			<li><b>Diffuse</b> models a matte surface that scatters light equally in all directions. Its brightness depends
+				only on the angle between the normal \(\mathbf{n}\) and the direction to the light \(\mathbf{l}\), and the light
+				falls off with the squared distance \(r^2\). It looks the same from every viewing direction, and it is what
+				gives the cloth its sense of 3D shape.</li>
+			<li><b>Specular</b> models shiny, mirror-like highlights. It uses the half vector \(\mathbf{h}\), the normalized
+				sum of the light and view directions. The highlight is brightest where \(\mathbf{n}\) lines up with
+				\(\mathbf{h}\), and the exponent \(p\) controls how tight it is. Unlike the diffuse term, it moves when the
+				camera moves.</li>
+		</ul>
+		<p>
+			I used \(k_a = 0.1\), \(I_a = (1,1,1)\), \(k_s = 0.5\), and \(p = 100\). The diffuse color \(k_d\) is taken from
+			the GUI color wheel (white here). The images below show the cloth from <code>sphere.json</code> at rest, from the
+			same camera, with each term on its own and then all three together. To render a single term, I set the other two
+			terms to zero.
+		</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/part5_phong_ambient.png" width="400px"/>
+				  <figcaption>Ambient only: a flat, uniform silhouette.</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part5_phong_diffuse.png" width="400px"/>
+				  <figcaption>Diffuse only: shading reveals the folds, with no highlights; areas facing away are black.</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/part5_phong_specular.png" width="400px"/>
+				  <figcaption>Specular only: just a small, sharp highlight on top and a thin one along a fold.</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part5_phong_full.png" width="400px"/>
+				  <figcaption>Full Blinn-Phong: ambient + diffuse + specular.</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+
+		<h3>Texture mapping</h3>
+		<p>
+			Each vertex of the cloth has a uv coordinate in \([0,1]^2\) that says where it falls on the texture. The vertex
+			shader passes the uv on, the rasterizer interpolates it, and the fragment shader looks up the color at that point
+			with <code>texture(u_texture_1, v_uv)</code>. For my custom texture I used a photo of a large relief mural.
+			OpenGL by default expects each row of an uploaded RGB image to start on a 4-byte boundary. The original photo
+			was 1707 pixels wide (5121 bytes per row), which would make the texture skewed, so I resized it to 1024 &times;
+			768 before replacing <code>textures/texture_1.png</code>. Because the cloth's uv square maps onto a 4:3 photo,
+			the image is squeezed slightly horizontally.
+		</p>
+		<figure>
+			<img src="assets/part5_texture.png" width="600px"/>
+			<figcaption>Texture shader with my own photo, on <code>pinned4.json</code> at rest. The image bends with the
+				cloth.</figcaption>
+		</figure>
+
+		<h3>Bump mapping</h3>
+		<p>
+			Bump mapping makes a surface look bumpy without changing its geometry, by perturbing the normal used for
+			shading. The height map \(h(u,v)\) is the red channel of <code>u_texture_2</code>. I estimate how fast the height
+			changes along \(u\) and \(v\) with finite differences of one texel:
+			\[ dU = \big(h(u + \tfrac{1}{w}, v) - h(u,v)\big)\, k_h k_n, \qquad dV = \big(h(u, v + \tfrac{1}{h}) - h(u,v)\big)\, k_h k_n, \]
+			where \(w, h\) are the texture's width and height, \(k_h\) is the height scaling, and \(k_n\) is the normal
+			scaling. The perturbed normal in tangent space is \(\mathbf{n}_o = (-dU, -dV, 1)\). It is converted to world
+			space with the TBN matrix \([\mathbf{t}\;\mathbf{b}\;\mathbf{n}]\), where \(\mathbf{b} = \mathbf{n}\times\mathbf{t}\):
+			\(\mathbf{n}_d = \text{TBN}\,\mathbf{n}_o\). The result is then shaded with Blinn-Phong. The cloth always supplies
+			the tangent \((1,0,0)\), which is not perpendicular to the normal once the cloth bends. So I first remove the part
+			of the tangent that lies along the normal (Gram-Schmidt) to keep the TBN frame orthonormal.
+		</p>
+		<p>
+			For both bump and displacement mapping I used the brick texture <code>texture_3.png</code> instead of the default
+			<code>texture_2.png</code>, by copying it over <code>texture_2.png</code>. The bump images use
+			\(k_n = 2\), \(k_h = 1\).
+		</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/part5_bump_cloth.png" width="400px"/>
+				  <figcaption>Bump mapping on the cloth (<code>pinned4.json</code>).</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part5_bump_sphere.png" width="400px"/>
+				  <figcaption>Bump mapping on the cloth resting on the sphere.</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+		<p>
+			The bricks and the recessed mortar lines are clearly visible, and they bend along with the cloth because the
+			perturbation is applied in each point's own tangent frame. However, the outline of the cloth stays perfectly
+			smooth: no vertex has moved.
+		</p>
+
+		<h3>Displacement mapping</h3>
+		<p>
+			Displacement mapping actually moves the geometry. In <code>Displacement.vert</code>, each vertex is pushed along
+			its original model-space normal by the height map:
+			\(\mathbf{p}' = \mathbf{p} + \mathbf{n}\, h(u,v)\, k_h\). The fragment shader is the same as for bump mapping, so
+			the shading uses the perturbed normal too. These images use \(k_n = 100\), \(k_h = 0.02\). Since
+			\(k_h k_n = 2\) as in the bump images, the shading detail is the same, and any difference comes from the moved
+			vertices.
+		</p>
+		<figure>
+			<img src="assets/part5_displacement_sphere.png" width="500px"/>
+			<figcaption>Displacement mapping on the cloth resting on the sphere. Compared with bump mapping, the cloth looks
+				thicker and puffier, and its outline is no longer smooth.</figcaption>
+		</figure>
+
+		<h3>Bump vs. displacement, and mesh resolution</h3>
+		<p>
+			To compare the two techniques on the sphere itself, I rendered the scene before the cloth falls (so the sphere is
+			uncovered) with a coarse sphere mesh (<code>-o 16 -a 16</code>) and a fine one (<code>-o 128 -a 128</code>).
+		</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/part5_bump_16.png" width="400px"/>
+				  <figcaption>Bump, 16 &times; 16</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part5_bump_128.png" width="400px"/>
+				  <figcaption>Bump, 128 &times; 128</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/part5_disp_16.png" width="400px"/>
+				  <figcaption>Displacement, 16 &times; 16</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part5_disp_128.png" width="400px"/>
+				  <figcaption>Displacement, 128 &times; 128</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+		<p>
+			<b>Bump mapping does not depend on the mesh resolution.</b> The 16 &times; 16 and 128 &times; 128 spheres look
+			nearly identical, with equally sharp bricks, because the normal is computed per pixel from the texture. Only the
+			outline differs slightly: the coarse sphere's silhouette is a polygon with a few visible straight segments.
+		</p>
+		<p>
+			<b>Displacement mapping does depend on the mesh resolution</b>, because it can only move the vertices that exist.
+			With the default height scale, the sphere's displacement is small: the sphere's model space is a unit sphere
+			scaled to its radius, so a displacement of up to 0.02 there is only about 2% of the radius in the world. The
+			effect on the sphere is subtle. On the 16 &times; 16 sphere it is essentially invisible, while the 128 &times;
+			128 sphere's outline becomes slightly uneven. The cloth above the sphere (50 &times; 50 vertices) shows the
+			effect much better: its near edge turns jagged. To make the difference on the sphere clearer, I also rendered both
+			resolutions up close with a larger height scale, \(k_h = 0.1\) (and \(k_n = 100\)):
+		</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/part5_disp_16_zoom.png" width="400px"/>
+				  <figcaption>Displacement, 16 &times; 16, \(k_h = 0.1\)</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part5_disp_128_zoom.png" width="400px"/>
+				  <figcaption>Displacement, 128 &times; 128, \(k_h = 0.1\)</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+		<p>
+			With the coarse mesh, the sphere becomes an irregular polyhedron. The bricks are still painted on by the
+			fragment shader, but the silhouette is made of straight edges and does not follow them, because each face spans
+			several bricks and the vertices cannot sample the height map's detail. With the fine mesh, the rows of bricks
+			visibly stick out, and the silhouette is lumpy where the bricks and mortar are. (The shading in these two images
+			is noisier because \(k_h k_n = 10\) here, five times the value used above, which exaggerates the perturbed
+			normals.) In short: bump mapping is cheap and works on any mesh, but it is only an illusion that breaks at the
+			silhouette. Displacement mapping changes the actual shape, but it needs a mesh dense enough to capture the
+			texture's detail.
+		</p>
+
+		<h3>Mirror shader</h3>
+		<p>
+			The mirror shader treats the surface as a perfect mirror reflecting an environment map. The direction toward the
+			camera is \(\mathbf{w}_o = \text{normalize}(\text{camera} - \mathbf{p})\). It is reflected about the normal,
+			\(\mathbf{w}_i = 2(\mathbf{w}_o\cdot\mathbf{n})\,\mathbf{n} - \mathbf{w}_o\), and the color is the cubemap
+			sampled in direction \(\mathbf{w}_i\). No light sources are involved: what each point shows depends only on its
+			normal and the viewing direction.
+		</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/part5_mirror.png" width="400px"/>
+				  <figcaption>Mirror cloth draped over the sphere.</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part5_mirror_sphere.png" width="400px"/>
+				  <figcaption>Before the cloth falls: a flat mirror (cloth) above a mirrored sphere.</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+		<p>
+			The flat cloth acts like an ordinary flat mirror: straight lines in the environment stay straight. The sphere's
+			normals cover almost every direction, so it reflects nearly the whole environment, compressed toward its edges
+			like a fisheye lens. The draped cloth is in between: each fold has its own normals, so the reflection is
+			stretched and distorted along the folds.
+		</p>
 
 		<h2>(Optional) Part 6: Extra Credit - Additional cloth simulation features!</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-		
-		<h2>Additional Notes (please remove)</h2>
-		<ul>
-			<li>You can also add code if you'd like as so: <code>code code code</code></li>
-			<li>If you'd like to add math equations, 
-				<ul>
-					<li>You can write inline equations like so: \( a^2 + b^2 = c^2 \)</li>
-					<li>You can write display equations like so: \[ a^2 + b^2 = c^2 \]</li>
-				</ul>
-			</li>
-		</ul>
+		<p>I did not attempt any extra credit for this homework.</p>
+
+<h2>Acknowledgement of AI</h2>
+<p>
+    For this assignment, I used AI tools as a learning assistant to clarify theoretical concepts related to mass-spring systems, numerical integration, collision detection, spatial hashing, and shader programming.
+    Some of the specific questions I explored included:
+</p>
+
+<h3>Part 1: Masses and springs</h3>
+<ul>
+    <li>What are the differences between structural, shearing, and bending constraints in a mass-spring cloth model, and why are all three necessary for realistic cloth simulation?</li>
+</ul>
+
+<h3>Part 2: Simulation via numerical integration</h3>
+<ul>
+    <li>How does Verlet integration calculate the next position using the current and previous positions, and how do damping and external forces affect the simulation?</li>
+</ul>
+
+<h3>Part 3: Handling collisions with other objects</h3>
+<ul>
+    <li>How do sphere and plane collision detection and response differ, and why are both the current and previous positions needed to correct a point mass after a collision?</li>
+</ul>
+
+<h3>Part 4: Handling self-collisions</h3>
+<ul>
+    <li>How does spatial hashing reduce the computational cost of self-collision detection compared with the naive O(n<sup>2</sup>) approach, and how are nearby point masses identified?</li>
+</ul>
+
+<h3>Part 5: Shaders</h3>
+<ul>
+    <li>What is the fundamental difference between bump mapping and displacement mapping, and how does the TBN matrix transform perturbed normals between coordinate spaces?</li>
+    <li>How does the Blinn-Phong shading model combine ambient, diffuse, and specular lighting, and how does environment mapping simulate reflections using a cubemap?</li>
+</ul>
+
+
 		</div>
 	</body>
 </html>
