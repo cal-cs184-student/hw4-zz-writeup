@@ -51,42 +51,496 @@
 		Give a high-level overview of what you implemented in this homework. Think about what you've built as a whole. Share your thoughts on what interesting things you've learned from completing the homework.
 
 		<h2>Part 1: Masses and springs</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+		<p>
+			The cloth is modeled as a grid of point masses connected by springs. <code>Cloth::buildGrid</code> builds this
+			grid from the scene parameters: the cloth's <code>width</code> and <code>height</code>, the number of masses along
+			each side (<code>num_width_points</code> &times; <code>num_height_points</code>), its orientation, and a list of
+			pinned grid positions.
+		</p>
 
-		<p>Here is an example 2x2 gridlike structure using an HTML table. Each <b>tr</b> is a row and each <b>td</b> is a column in that row. You might find this useful for framing and showing your result images in an organized fashion.</p>
+		<h3>Point masses</h3>
+		<p>
+			The masses are spaced evenly so that the first mass sits at \((0, 0)\) and the last one at
+			\((\text{width}, \text{height})\) in the plane of the cloth. With \(W\) and \(H\) masses per side, the spacing is
+			\[ \Delta x = \frac{\text{width}}{W - 1}, \qquad \Delta y = \frac{\text{height}}{H - 1}, \]
+			and the mass at grid index \((x, y)\) is placed at:
+		</p>
+		<ul>
+			<li><b>Horizontal cloth:</b> \((x\Delta x,\ 1,\ y\Delta y)\), so it lies flat in the \(xz\) plane at height \(y = 1\).</li>
+			<li><b>Vertical cloth:</b> \((x\Delta x,\ y\Delta y,\ z)\), where \(z\) is a small random offset in
+				\([-10^{-3}, 10^{-3}]\). A perfectly flat vertical sheet has no out-of-plane component for forces to act on,
+				so the tiny offset lets it start to fold naturally once it moves.</li>
+		</ul>
+		<p>
+			All masses are stored in a single <code>vector&lt;PointMass&gt;</code> in <b>row-major order</b>, so the mass at
+			\((x, y)\) is at index \(yW + x\). The mesh-building code that turns the masses into triangles relies on this
+			ordering. To decide which masses are pinned, I first convert every pinned \((x, y)\) pair from the scene file into
+			its 1D index and store them in a hash set. Each mass then needs only one constant-time lookup, instead of a scan
+			over the whole pinned list.
+		</p>
+
+		<h3>Springs</h3>
+		<p>
+			After every mass exists, a second pass over the grid creates the springs. Each spring stores pointers to its two
+			masses, its type, and a rest length equal to the distance between the masses when the spring is created. There
+			are three kinds of springs, each resisting a different kind of deformation:
+		</p>
+		<ul>
+			<li><b>Structural</b> springs connect each mass to its neighbor on the left and its neighbor above, with rest length
+				\(\Delta x\) or \(\Delta y\). They resist stretching and compression along the grid lines.</li>
+			<li><b>Shearing</b> springs connect each mass to its upper-left and upper-right diagonal neighbors. They resist
+				shearing, where a square of the grid collapses into a rhombus.</li>
+			<li><b>Bending</b> springs connect each mass to the mass two to the left and the mass two above. They resist
+				folding the cloth over itself. Part 2 makes them weaker than the other two kinds.</li>
+		</ul>
+		<p>
+			Because each mass only connects to neighbors that come before it (to its left or above), every pair of masses gets
+			exactly one spring and no spring is created twice. Masses on the edges simply skip the neighbors that do not exist.
+			For a \(W \times H\) grid this gives
+		</p>
+		\[
+			\underbrace{W(H-1) + H(W-1)}_{\text{structural}} \;+\;
+			\underbrace{2(W-1)(H-1)}_{\text{shearing}} \;+\;
+			\underbrace{W(H-2) + H(W-2)}_{\text{bending}}
+		\]
+		<p>
+			springs. For the \(50 \times 50\) cloth in <code>pinned2.json</code>, that is 4900 structural, 4802 shearing, and
+			4800 bending springs. I checked my grid against these counts, as well as the mass positions, pinned flags, and
+			rest lengths.
+		</p>
+
+		<h3>Results</h3>
+		<p>Wireframe renderings of <code>scene/pinned2.json</code>, with different sets of constraints turned on:</p>
 		<div style="display: flex; flex-direction: column; align-items: center;">
 			<table style="width: 100%; text-align: center; border-collapse: collapse;">
 			  <tr>
 				<td style="text-align: center;">
-				  <img src="assets/clothsim.png" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
+				  <img src="assets/part1_no_shearing.png" width="400px"/>
+				  <figcaption>Structural and bending springs only (no shearing).</figcaption>
 				</td>
 				<td style="text-align: center;">
-				  <img src="assets/clothsim.png" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
+				  <img src="assets/part1_shearing_only.png" width="400px"/>
+				  <figcaption>Shearing springs only.</figcaption>
 				</td>
 			  </tr>
 			  <tr>
-				<td style="text-align: center;">
-				  <img src="assets/clothsim.png" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
-				</td>
-				<td style="text-align: center;">
-				  <img src="assets/clothsim.png" width="400px"/>
-				  <figcaption>Caption goes here.</figcaption>
+				<td style="text-align: center;" colspan="2">
+				  <img src="assets/part1_all.png" width="400px"/>
+				  <figcaption>All constraints: structural, shearing, and bending.</figcaption>
 				</td>
 			  </tr>
 			</table>
 		</div>
+		<p>
+			All three images use the same camera, looking at the cloth from one of its corners, which is the bottom tip of
+			each image. From this angle, the cloth's own grid lines run diagonally across the screen.
+		</p>
+		<ul>
+			<li><b>No shearing:</b> only the springs along the grid lines remain, so the cloth looks like a regular grid of
+				squares. Bending springs are on, but they cannot be told apart: a bending spring connects masses two apart
+				in the same row or column, so it lies exactly on top of two structural springs.</li>
+			<li><b>Shearing only:</b> the diagonal springs of neighboring squares line up end to end into long straight
+				lines. The two families of diagonals form a lattice rotated 45&deg; relative to the cloth's grid, which is
+				why the lines now run horizontally and vertically on screen. The single line at the bottom tip is the corner
+				mass's only shearing spring: a corner has exactly one diagonal neighbor.</li>
+			<li><b>All constraints:</b> both patterns overlap, so every square of the grid is crossed by an
+				&ldquo;X&rdquo; of shearing springs.</li>
+		</ul>
 
 		<h2>Part 2: Simulation via numerical integration</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+		<p>
+			<code>Cloth::simulate</code> advances the cloth by one time step \(\Delta t\). The simulator calls it
+			<code>steps/frame</code> times per frame, so with the default 90 frames/s and 30 steps/frame,
+			\(\Delta t = 1/2700\) s. Each step has three stages: compute the force on every point mass, move every mass
+			with Verlet integration, and then limit how far any spring can stretch.
+		</p>
+
+		<h3>Computing forces</h3>
+		<p>
+			Each point mass has mass \(m = \text{width} \cdot \text{height} \cdot \text{density} / (W H)\). At the start of
+			every step, each mass's force is reset to the external force \(F = m \sum_i a_i\), where the \(a_i\) are the
+			external accelerations (here just gravity). Then every spring whose constraint type is enabled in the GUI adds a
+			spring force following Hooke's law:
+			\[ F_s = k_s \left( \lVert p_b - p_a \rVert - l \right), \]
+			where \(l\) is the spring's rest length. The force acts along the line between the two masses. When the spring is
+			stretched, it pulls \(a\) toward \(b\) with force \(F_s\), and pulls \(b\) toward \(a\) with the equal and opposite
+			force. Bending springs use \(0.2\,k_s\) instead of \(k_s\). Real cloth bends much more easily than it stretches,
+			so weaker bending springs let the cloth fold while still resisting sharp creases.
+		</p>
+
+		<h3>Verlet integration</h3>
+		<p>
+			Instead of storing velocity, each mass remembers its position from the previous step, and the velocity is
+			implied by the difference between the two positions. With damping, the new position of each unpinned mass is
+			\[ x_{t+\Delta t} = x_t + (1 - d)\,(x_t - x_{t-\Delta t}) + a_t\,\Delta t^2, \qquad a_t = F / m, \]
+			where \(d\) is the GUI damping value divided by 100, since the GUI gives it in percent. The term
+			\(1 - d\) removes a small fraction of the velocity every step. This stands in for energy loss from friction and
+			air resistance, which the model does not simulate otherwise. After the update, the old \(x_t\) becomes the new
+			<code>last_position</code>. Pinned masses are skipped entirely, so they stay fixed.
+		</p>
+
+		<h3>Constraining spring length (Provot 1995)</h3>
+		<p>
+			With only springs and gravity, the cloth can stretch unrealistically far in a single step, especially where it
+			carries the most weight, near the pinned corners. After integration, I go through every enabled spring once.
+			If its length is more than \(1.1\,l\), I pull its two masses toward each other, along the spring's direction,
+			until it is exactly \(1.1\,l\) long. If both masses are free, each moves half of the correction. If one is pinned,
+			the free mass takes the whole correction. If both are pinned, the spring is left alone, since neither mass can
+			move and the distance between them never changes from its starting value.
+		</p>
+		<p>
+			Because this is a single pass, fixing one spring can stretch a neighbor that was already fixed earlier in the
+			pass. In a test run of <code>pinned2.json</code> that I simulated for 10 seconds, about 3.8% of the springs
+			ended slightly above the limit, at most about 1.126 times their rest length. These springs were all near the
+			heavily loaded top edge and pinned corners. More passes per step would reduce this, but one pass already keeps
+			the cloth from stretching unrealistically.
+		</p>
+
+		<h3>Experimenting with parameters</h3>
+		<p>
+			All experiments use <code>scene/pinned2.json</code> (two corners pinned), seen from the same camera angle. I
+			changed one parameter at a time and kept all others at their defaults. Values are as shown in the GUI: density
+			15 g/cm&sup2;, \(k_s\) = 5000 N/m, damping 0.2%.
+		</p>
+		<figure>
+			<img src="assets/part2_default.png" width="400px"/>
+			<figcaption>Default parameters, at rest.</figcaption>
+		</figure>
+
+		<h4>Spring constant \(k_s\)</h4>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/part2_ks_low.png" width="400px"/>
+				  <figcaption>\(k_s\) = 500 N/m, at rest.</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part2_ks_high.png" width="400px"/>
+				  <figcaption>\(k_s\) = 50000 N/m, at rest.</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+		<p>
+			With a <b>low</b> \(k_s\), the springs are soft, so gravity stretches them more. Compared with the default, the
+			top edge between the two pinned corners sags much deeper. The cloth also gets longer: its bottom edge bows
+			downward instead of staying straight, and its sides curve inward. The grid near the pinned corners is visibly
+			stretched and skewed. With a <b>high</b> \(k_s\), the cloth is stiff. The top edge is pulled almost straight,
+			the cloth stays close to its original square shape, and its bottom edge sits higher than in the default case.
+			Small wrinkles appear near the pinned corners, where the taut cloth is pulled in two directions at once.
+		</p>
+
+		<h4>Density</h4>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/part2_density_low.png" width="400px"/>
+				  <figcaption>Density = 1 g/cm&sup2;, at rest.</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part2_density_high.png" width="400px"/>
+				  <figcaption>Density = 150 g/cm&sup2;, at rest.</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+		<p>
+			Density has the opposite effect of \(k_s\). A <b>low</b> density makes the cloth light. It barely stretches,
+			and the resting shape looks almost the same as the high-\(k_s\) case. A <b>high</b> density makes the cloth
+			heavy, and its resting shape is nearly identical to the low-\(k_s\) case. This makes sense: at rest, how far
+			each spring stretches depends on the weight it holds relative to its stiffness, roughly \(m g / k_s\), and
+			\(m\) is proportional to density. Multiplying the density by 10 (15 &rarr; 150) therefore looks just like
+			dividing \(k_s\) by 10 (5000 &rarr; 500). Dividing the density by 15 (15 &rarr; 1) looks like multiplying
+			\(k_s\) by 10 (5000 &rarr; 50000), with the top edge even slightly flatter.
+		</p>
+
+		<h4>Damping</h4>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/part2_damping_low.png" width="400px"/>
+				  <figcaption>Damping = 0%, about 2 seconds after the start.</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part2_damping_high.png" width="400px"/>
+				  <figcaption>Damping = 1%, about 2 seconds after the start.</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+		<p>
+			Damping changes how the cloth moves, not where it ends up, so these two screenshots were taken while the cloth
+			was still moving, about 2 seconds after starting the simulation. With <b>no damping</b>, the velocity term is
+			never reduced. The cloth swings hard as it falls, its lower half whips forward and back, and it crumples into many
+			folds. It keeps swinging for a very long time: after 5 minutes it was still visibly moving. The main thing taking
+			energy out is the length constraint, which removes a little motion each time it pulls an over-stretched spring
+			back. With <b>high damping</b> (1%), each step keeps only 99% of the velocity, and there are 2700 steps per
+			second. The cloth sinks slowly and smoothly, as if falling through syrup. At 2 seconds it is still descending,
+			with no folds at all, and it came to rest after about 10 seconds without swinging back and forth.
+		</p>
+
+		<h3>Resting state of <code>pinned4.json</code></h3>
+		<figure>
+			<img src="assets/part2_pinned4_shaded.png" width="500px"/>
+			<figcaption><code>scene/pinned4.json</code> at rest, with all four corners pinned, rendered with the normal
+				shader. All parameters are the defaults: density 15 g/cm&sup2;, \(k_s\) = 5000 N/m, damping 0.2%.</figcaption>
+		</figure>
 
 		<h2>Part 3: Handling collisions with other objects</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+		<p>
+			Collisions are handled by correcting positions after each Verlet step, not by applying forces. In
+			<code>Cloth::simulate</code>, right after integration, every unpinned point mass is passed to the
+			<code>collide</code> method of every collision object in the scene. If the mass has ended up inside or on the
+			wrong side of the object, <code>collide</code> moves it back to the surface. Both object types use the same
+			idea. They find a point on the surface where the mass should be (the <i>tangent point</i>), compute the
+			correction from the mass's <i>previous</i> position <code>last_position</code> to that point, and set
+			\[ x_{\text{new}} = x_{\text{last}} + (1 - f)\,(x_{\text{target}} - x_{\text{last}}), \]
+			where \(f\) is the object's friction coefficient. Starting from the previous position, rather than the
+			penetrating one, means the mass moves at most as far as it legitimately could. Scaling the move by \(1 - f\)
+			makes the mass lose a fraction \(f\) of its motion every time it touches the surface, which acts like friction
+			and makes the cloth grip the object instead of sliding off.
+		</p>
+
+		<h3>Spheres</h3>
+		<p>
+			A mass collides with a sphere of center \(c\) and radius \(R\) when \(\lVert x - c \rVert \le R\). I compare
+			squared lengths here, so no square root is needed for the many masses that are not touching the sphere. The
+			tangent point is where the ray from the center through the mass leaves the sphere:
+			\[ x_{\text{target}} = c + R\,\frac{x - c}{\lVert x - c \rVert}. \]
+			This pushes the mass straight outward along the sphere's normal at that point. A mass exactly at the center
+			has no outward direction, so it is skipped; this cannot happen in practice.
+		</p>
+
+		<h3>Planes</h3>
+		<p>
+			For a plane through point \(p\) with unit normal \(n\), I compute the mass's signed distance to the plane
+			before and after the step: \(d_{\text{last}} = (x_{\text{last}} - p)\cdot n\) and
+			\(d = (x - p)\cdot n\). A collision means the mass started on one side and ended on or past the plane: the
+			signs of the two distances differ. The tangent point is where the mass would meet the plane moving straight
+			toward it, \(x - d\,n\). Moving the mass exactly onto the plane could leave it numerically on the wrong side,
+			so the target is offset slightly, by \(\epsilon\) = <code>SURFACE_OFFSET</code> = 0.0001, back toward the side
+			the mass came from:
+			\[ x_{\text{target}} = x - d\,n + s\,\epsilon\,n, \qquad s = \operatorname{sign}(d_{\text{last}}). \]
+		</p>
+		<p>
+			One edge case came up while testing. A vertical cloth that starts standing on the floor (as in
+			<code>selfCollision.json</code>) has its bottom row at a distance of <i>exactly</i> zero from the plane, so it
+			does not start strictly on either side. If that case is ignored, those masses fall straight through the floor.
+			I treat a mass that starts exactly on the plane as being on the side the normal points to, so it is kept above
+			the floor.
+		</p>
+		<p>
+			Testing with the sphere scene showed that a mass can end a step up to about 0.0001 inside the sphere (0.05% of
+			its radius). Two things cause this. Moving only a fraction \(1 - f\) of the way from the previous position to
+			the tangent point can stop short of the surface. Also, the spring-length constraint runs after the collision
+			step and can pull a mass slightly back in. The penetration is far too small to see.
+		</p>
+
+		<h3>Results: cloth on a sphere</h3>
+		<p>
+			<code>scene/sphere.json</code> at rest with three spring constants. All other parameters are the defaults, and
+			all three use the same camera and the normal shader.
+		</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/part3_sphere_ks500.png" width="300px"/>
+				  <figcaption>\(k_s\) = 500 N/m</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part3_sphere_ks5000.png" width="300px"/>
+				  <figcaption>\(k_s\) = 5000 N/m (default)</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part3_sphere_ks50000.png" width="300px"/>
+				  <figcaption>\(k_s\) = 50000 N/m</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+		<ul>
+			<li><b>\(k_s\) = 500:</b> the soft cloth wraps tightly around the sphere. The top is perfectly smooth and follows
+				the sphere's shape like a thin film. Below the sphere, the cloth hangs almost straight down, barely wider
+				than the sphere itself, and breaks into many thin vertical folds, like a fringe.</li>
+			<li><b>\(k_s\) = 5000:</b> the cloth still rests on the sphere, but a few small bumps appear on top. The hanging
+				part flares outward past the sphere's width and forms a handful of medium-sized wavy folds.</li>
+			<li><b>\(k_s\) = 50000:</b> the stiff cloth no longer follows the sphere's surface. The top shows clear creases
+				and bumps, and the corners stick out and up instead of hanging down, a bit like cardboard laid over a ball.
+				The hanging part flares out the most, with only two or three very large folds.</li>
+		</ul>
+		<p>
+			A lower \(k_s\) makes the springs easier to stretch and the bending springs easier to bend, so gravity can
+			pull the cloth closely around the sphere and fold it into many small folds. A higher \(k_s\) resists both
+			stretching and bending, so the cloth keeps more of its original flat shape. It can only bend in a few
+			places, which gives fewer, larger folds.
+		</p>
+
+		<h3>Results: cloth on a plane</h3>
+		<figure>
+			<img src="assets/part3_plane.png" width="500px"/>
+			<figcaption><code>scene/plane.json</code> at rest: the cloth lies flat on the plane (default parameters, normal
+				shader). Because the cloth and the plane both face straight up, the normal shader gives them nearly the same
+				color; the slightly lighter square is the cloth.</figcaption>
+		</figure>
 
 		<h2>Part 4: Handling self-collisions</h2>
-		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+		<p>
+			Without self-collision, nothing stops one part of the cloth from passing through another, so a cloth that falls
+			onto itself collapses into a single flat sheet. To prevent this, every point mass should stay at least
+			\(2 \cdot \text{thickness}\) away from every other point mass. Checking every pair directly costs
+			\(O(n^2)\) per time step: for a \(50 \times 50\) cloth that is over 3 million pairs, thousands of times per
+			simulated second. Instead, I use <b>spatial hashing</b> so that each mass only checks the few masses near it.
+		</p>
+
+		<h3>Spatial hashing</h3>
+		<p>
+			Space is divided into a 3D grid of boxes of size \(w \times h \times t\), where
+			\[ w = \frac{3 \cdot \text{width}}{W}, \qquad h = \frac{3 \cdot \text{height}}{H}, \qquad t = \max(w, h). \]
+			The factor of 3 (the spec's empirically chosen constant) makes each box about three grid spacings wide.
+			<code>hash_position</code> maps a position to the box that contains it: it computes the integer box coordinates
+			\((\lfloor x/w \rfloor, \lfloor y/h \rfloor, \lfloor z/t \rfloor)\) and combines them into one number. The hash
+			table uses <code>float</code> keys, which can represent every integer below \(2^{24}\) exactly. So I wrap each
+			box coordinate into the range \([0, 256)\) and combine them as \(b_x + 256\,(b_y + 256\,b_z)\), which always
+			stays below \(2^{24}\). This gives every box within a 256-box range per axis (about 15 m for the default cloth)
+			its own key. Boxes farther apart than that could share a key, but that would only add a few extra candidates,
+			which the distance check below rejects. I verified that all \(128^3\) boxes in a block of space get distinct
+			keys.
+		</p>
+		<p>
+			At every time step, <code>build_spatial_map</code> clears the table and inserts a pointer to every point mass
+			under its box's key. The table maps each key to a list of the masses in that box. Positions change every step,
+			so the table has to be rebuilt every step.
+		</p>
+
+		<h3>Resolving self-collisions</h3>
+		<p>
+			For each unpinned point mass \(p\), <code>self_collide</code> looks up the masses in the same box. For every
+			candidate \(q \ne p\) closer than \(2 \cdot \text{thickness}\), it computes the correction that would push
+			\(p\) directly away from \(q\) until they are exactly \(2 \cdot \text{thickness}\) apart:
+			\[ \Delta_q = \left(2 \cdot \text{thickness} - \lVert p - q \rVert\right) \frac{p - q}{\lVert p - q \rVert}. \]
+			Only \(p\) moves; \(q\) gets its own correction when it is processed. The final correction is the average of
+			all \(\Delta_q\), divided by <code>simulation_steps</code>. Averaging keeps \(p\) from being pushed too far
+			when several neighbors are too close at once. Dividing by the number of steps per frame spreads the
+			correction over many small steps, which avoids sudden jumps and jitter. In <code>simulate</code>, self-collision
+			runs right after Verlet integration and before collisions with other objects.
+		</p>
+		<p>
+			I tested this on <code>selfCollision.json</code> by simulating 10 seconds with and without self-collision
+			(thickness set to 0 to turn it off). I then counted pairs of masses that are not direct grid neighbors but are
+			closer than \(2 \cdot \text{thickness}\) = 0.019:
+		</p>
+		<table style="margin: 0 auto; border-collapse: collapse; text-align: center;">
+			<tr><th style="padding: 4px 12px;"></th><th style="padding: 4px 12px;">Self-collision on</th><th style="padding: 4px 12px;">Self-collision off</th></tr>
+			<tr><td style="padding: 4px 12px;">Pairs closer than 0.019</td><td>539</td><td>7862</td></tr>
+			<tr><td style="padding: 4px 12px;">Closest pair distance</td><td>0.0113</td><td>0.00013</td></tr>
+		</table>
+		<p>
+			Self-collision removes over 90% of the overlapping pairs. Some pairs remain for two reasons. First, the
+			correction is spread over several steps (it is divided by <code>simulation_steps</code>), so a pair can stay
+			slightly too close for a while. Second, only the mass's own box is checked: two masses on opposite sides of a box
+			boundary are never compared, however close they are. Checking the 26 neighboring boxes as well would catch
+			these, at a higher cost.
+		</p>
+
+		<h3>Results: cloth falling on itself</h3>
+		<p>
+			<code>scene/selfCollision.json</code> with default parameters, rendered with the normal shader. The colors show
+			the surface normal: parts of the cloth that folded over and are showing their back side appear purple.
+		</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/part4_seq_1.png" width="300px"/>
+				  <figcaption>1. The bottom hits the floor and starts to pile up.</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part4_seq_2.png" width="300px"/>
+				  <figcaption>2. The cloth falls over and folds onto itself.</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part4_seq_3.png" width="300px"/>
+				  <figcaption>3. Nearly at rest, mostly spread out.</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+		<ol>
+			<li>The bottom edge reaches the floor while the rest of the cloth is still falling. The cloth is squeezed
+				vertically, so it buckles into many horizontal ripples, densest near the bottom, and the lowest part stacks
+				into a few layers on the floor.</li>
+			<li>The cloth tips over and folds onto itself in several layers: a top layer flipped over (purple) lies on the
+				parts that landed first, and one side rolls into a thick fold. The layers stay clearly separated instead of
+				passing through each other.</li>
+			<li>Over time the cloth spreads back out into a nearly flat square, leaving only one triangular corner folded over
+				and a slightly rolled edge. As the spec notes, the cloth keeps flattening slowly, since nothing in the model
+				damps the springs' tendency to unfold it. The folded corner still sits cleanly on top of the layer below.</li>
+		</ol>
+
+		<h3>Varying \(k_s\) and density</h3>
+		<p>
+			All four images use the same camera and were taken while the cloth was folding, at about the same moment as image 2
+			above. Only the listed parameter differs from the defaults (density 15 g/cm&sup2;, \(k_s\) = 5000 N/m).
+		</p>
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<table style="width: 100%; text-align: center; border-collapse: collapse;">
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/part4_ks_low.png" width="400px"/>
+				  <figcaption>\(k_s\) = 500 N/m</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part4_ks_high.png" width="400px"/>
+				  <figcaption>\(k_s\) = 50000 N/m</figcaption>
+				</td>
+			  </tr>
+			  <tr>
+				<td style="text-align: center;">
+				  <img src="assets/part4_density_high.png" width="400px"/>
+				  <figcaption>Density = 150 g/cm&sup2;</figcaption>
+				</td>
+				<td style="text-align: center;">
+				  <img src="assets/part4_density_low.png" width="400px"/>
+				  <figcaption>Density = 1 g/cm&sup2;</figcaption>
+				</td>
+			  </tr>
+			</table>
+		</div>
+		<p>
+			<b>Low \(k_s\) / high density (left column).</b> The cloth crumples into a narrow, compact strip of many tightly
+			stacked layers. Its whole surface is covered in small, irregular wrinkles, like crumpled paper. Soft springs let
+			the cloth compress and bend over very short distances, so it can form many small folds and pack them tightly.
+		</p>
+		<p>
+			<b>High \(k_s\) / low density (right column).</b> The cloth folds in a few large, smooth, rounded folds, like a
+			thick canvas. It covers a wider area, and the layers leave visible gaps where the upper layer arches over the
+			lower one. Stiff springs resist both stretching and bending, so the cloth can only bend in a few places, over long
+			distances.
+		</p>
+		<p>
+			The two columns line up because, in this simulation, the motion depends only on the ratio of \(k_s\) to density.
+			A mass's acceleration is
+			\[ a = g + \frac{F_{\text{springs}}}{m}, \qquad F_{\text{springs}} \propto k_s, \quad m \propto \text{density}, \]
+			and gravity, collisions, and the spring-length constraint do not depend on mass at all. So multiplying the
+			density by 10 (15 &rarr; 150) is mathematically the same as dividing \(k_s\) by 10 (5000 &rarr; 500), and
+			density 1 is the same as \(k_s\) = 75000. The density-150 and \(k_s\)-500 images show the same behavior, a
+			narrow strip with fine wrinkles, but they are not pixel-identical. The screenshots were paused by hand at slightly
+			different moments, and folding cloth is very sensitive to tiny differences: the two parameter sets round
+			differently in floating point, and those differences grow over thousands of steps.
+		</p>
+		<p>
+			I also let each run settle. All of them spread out over time, but to different degrees. The stiffest case,
+			density 1 (equivalent to \(k_s\) = 75000), flattened completely with no folds left. With \(k_s\) = 50000, the
+			cloth ended almost flat with one wide, smooth curl along an edge. With \(k_s\) = 500, it ended almost flat with a
+			tightly rolled edge full of small wrinkles. With density 150, it was still folded in two layers, with fine
+			wrinkles along the fold. Softer cloth keeps more small-scale folding, and stiffer cloth unfolds more smoothly
+			and completely. Some runs also ended with the whole cloth flipped upside down. Which way the cloth ends up
+			facing depends on exactly how it tumbled, so I do not attribute that to the parameters.
+		</p>
 
 		<h2>Part 5: Shaders</h2>
 		Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
