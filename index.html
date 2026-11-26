@@ -185,7 +185,7 @@
 			every step, each mass's force is reset to the external force \(F = m \sum_i a_i\), where the \(a_i\) are the
 			external accelerations (here just gravity). Then every spring whose constraint type is enabled in the GUI adds a
 			spring force following Hooke's law:
-			\[ F_s = k_s \left( \lVert p_b - p_a \rVert - l \right), \]
+			\[ F_s = k_s \left( \| p_b - p_a \| - l \right), \]
 			where \(l\) is the spring's rest length. The force acts along the line between the two masses. When the spring is
 			stretched, it pulls \(a\) toward \(b\) with force \(F_s\), and pulls \(b\) toward \(a\) with the equal and opposite
 			force. Bending springs use \(0.2\,k_s\) instead of \(k_s\). Real cloth bends much more easily than it stretches,
@@ -370,10 +370,10 @@
 
 		<h3>Spheres</h3>
 		<p>
-			A mass collides with a sphere of center \(c\) and radius \(R\) when \(\lVert x - c \rVert \le R\). I compare
+			A mass collides with a sphere of center \(c\) and radius \(R\) when \(\| x - c \| \le R\). I compare
 			squared lengths here, so no square root is needed for the many masses that are not touching the sphere. The
 			tangent point is where the ray from the center through the mass leaves the sphere:
-			\[ x_{\text{target}} = c + R\,\frac{x - c}{\lVert x - c \rVert}. \]
+			\[ x_{\text{target}} = c + R\,\frac{x - c}{\| x - c \|}. \]
 			This pushes the mass straight outward along the sphere's normal at that point. A mass exactly at the center
 			has no outward direction, so it is skipped; this cannot happen in practice.
 		</p>
@@ -387,7 +387,7 @@
 			toward it, \(x - d\,n\). Moving the mass exactly onto the plane could leave it numerically on the wrong side,
 			so the target is offset slightly, by \(\epsilon\) = <code>SURFACE_OFFSET</code> = 0.0001, back toward the side
 			the mass came from:
-			\[ x_{\text{target}} = x - d\,n + s\,\epsilon\,n, \qquad s = \operatorname{sign}(d_{\text{last}}). \]
+			\[ x_{\text{target}} = x - d\,n + s\,\epsilon\,n, \qquad s = \mathrm{sign}(d_{\text{last}}). \]
 		</p>
 		<p>
 			One edge case came up while testing. A vertical cloth that starts standing on the floor (as in
@@ -485,7 +485,7 @@
 			For each unpinned point mass \(p\), <code>self_collide</code> looks up the masses in the same box. For every
 			candidate \(q \ne p\) closer than \(2 \cdot \text{thickness}\), it computes the correction that would push
 			\(p\) directly away from \(q\) until they are exactly \(2 \cdot \text{thickness}\) apart:
-			\[ \Delta_q = \left(2 \cdot \text{thickness} - \lVert p - q \rVert\right) \frac{p - q}{\lVert p - q \rVert}. \]
+			\[ \Delta_q = \left(2 \cdot \text{thickness} - \| p - q \|\right) \frac{p - q}{\| p - q \|}. \]
 			Only \(p\) moves; \(q\) gets its own correction when it is processed. The final correction is the average of
 			all \(\Delta_q\), divided by <code>simulation_steps</code>. Averaging keeps \(p\) from being pushed too far
 			when several neighbors are too close at once. Dividing by the number of steps per frame spreads the
@@ -691,7 +691,7 @@
 			Bump mapping makes a surface look bumpy without changing its geometry, by perturbing the normal used for
 			shading. The height map \(h(u,v)\) is the red channel of <code>u_texture_2</code>. I estimate how fast the height
 			changes along \(u\) and \(v\) with finite differences of one texel:
-			\[ dU = \big(h(u + \tfrac{1}{w}, v) - h(u,v)\big)\, k_h k_n, \qquad dV = \big(h(u, v + \tfrac{1}{h}) - h(u,v)\big)\, k_h k_n, \]
+			\[ dU = \big(h(u + \frac{1}{w}, v) - h(u,v)\big)\, k_h k_n, \qquad dV = \big(h(u, v + \frac{1}{h}) - h(u,v)\big)\, k_h k_n, \]
 			where \(w, h\) are the texture's width and height, \(k_h\) is the height scaling, and \(k_n\) is the normal
 			scaling. The perturbed normal in tangent space is \(\mathbf{n}_o = (-dU, -dV, 1)\). It is converted to world
 			space with the TBN matrix \([\mathbf{t}\;\mathbf{b}\;\mathbf{n}]\), where \(\mathbf{b} = \mathbf{n}\times\mathbf{t}\):
